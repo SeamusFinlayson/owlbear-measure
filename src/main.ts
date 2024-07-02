@@ -36,7 +36,12 @@ OBR.onReady(async () => {
 
 async function setUpWhenSceneReady() {
   const start = async () => {
-    setUp();
+    gridDpi = await OBR.scene.grid.getDpi();
+    gridScale = await OBR.scene.grid.getScale();
+    startCallbacks();
+
+    createTool();
+    createToolMode();
   };
 
   // Handle when the scene is either changed or made ready after extension load
@@ -49,12 +54,26 @@ async function setUpWhenSceneReady() {
   if (isReady) start();
 }
 
-async function setUp() {
-  gridDpi = await OBR.scene.grid.getDpi(); //TODO: verify that scene is ready before running this
-  gridScale = await OBR.scene.grid.getScale();
+let callbacksStarted = false;
+async function startCallbacks() {
+  if (!callbacksStarted) {
+    callbacksStarted = true;
+  }
 
-  createTool();
-  createToolMode();
+  const unsubscribeFromGrid = OBR.scene.grid.onChange(async grid => {
+    gridDpi = grid.dpi;
+    gridScale = await OBR.scene.grid.getScale();
+    console.log("update");
+  });
+
+  // Unsubscribe listeners that rely on the scene if it stops being ready
+  const unsubscribeFromScene = OBR.scene.onReadyChange(isReady => {
+    if (!isReady) {
+      unsubscribeFromGrid();
+      unsubscribeFromScene();
+      callbacksStarted = false;
+    }
+  });
 }
 
 function createTool() {
@@ -63,9 +82,10 @@ function createTool() {
     icons: [
       {
         icon: toolIcon,
-        label: "My Tool Label",
+        label: "Measure++",
       },
     ],
+    shortcut: "Z",
   });
 }
 
@@ -73,18 +93,25 @@ function createToolMode() {
   let curveInteraction: InteractionManager<Curve> | null = null;
   let labelInteraction: InteractionManager<Label> | null = null;
   let itemInteraction: InteractionManager<Item> | null = null;
-  let interactedItem: Item | null = null;
+  let initialInteractedItem: Item | null = null;
   let linePoints: Vector2[] | null = null;
   let pointerPosition: Vector2 | null = null;
 
-  let lastPosition: Vector2 = { x: 0, y: 0 };
+  const resetState = () => {
+    curveInteraction = null;
+    labelInteraction = null;
+    itemInteraction = null;
+    initialInteractedItem = null;
+    linePoints = null;
+    pointerPosition = null;
+  };
 
   OBR.tool.createMode({
     id: modeId,
     icons: [
       {
         icon: toolIcon,
-        label: "My Tool Mode Label",
+        label: "Drag Measure",
         filter: {
           activeTools: [toolId],
         },
@@ -94,7 +121,7 @@ function createToolMode() {
       pointerPosition = event.pointerPosition;
       const token = event.target;
       if (token && isImage(token)) {
-        interactedItem = token;
+        initialInteractedItem = token;
         const startPosition = calculateStartPosition(token);
         linePoints = [];
         linePoints.push(startPosition);
@@ -108,6 +135,7 @@ function createToolMode() {
             .strokeWidth(gridDpi / 10)
             .strokeDash([gridDpi / 5])
             .tension(0)
+            .visible(token.visible)
             .layer("RULER")
             .build()
         );
@@ -122,6 +150,7 @@ function createToolMode() {
               ]).toString()
             )
             .pointerHeight(0)
+            .visible(token.visible)
             .layer("RULER")
             .build()
         );
@@ -129,7 +158,7 @@ function createToolMode() {
         itemInteraction = await OBR.interaction.startItemInteraction(token);
       }
     },
-    onToolDragMove: (_context: ToolContext, event: ToolEvent) => {
+    onToolDragMove: async (_context: ToolContext, event: ToolEvent) => {
       pointerPosition = event.pointerPosition;
 
       if (linePoints === null) return;
@@ -137,9 +166,8 @@ function createToolMode() {
         linePoints[linePoints.length - 1],
         event.pointerPosition
       );
-      if (newPosition === lastPosition) return;
-      lastPosition = newPosition;
 
+      // Update item position
       if (itemInteraction) {
         const [update] = itemInteraction;
         update(item => {
@@ -147,6 +175,7 @@ function createToolMode() {
         });
       }
 
+      // Update path drawing
       if (curveInteraction) {
         const [update] = curveInteraction;
         update(curve => {
@@ -155,14 +184,16 @@ function createToolMode() {
         });
       }
 
+      // Update label text and position
       if (labelInteraction) {
         const [update] = labelInteraction;
+        const newText = calculateDisplayDistance([
+          ...linePoints,
+          event.pointerPosition,
+        ]).toString();
         update(label => {
           if (linePoints === null) return;
-          label.text.plainText = calculateDisplayDistance([
-            ...linePoints,
-            event.pointerPosition,
-          ]).toString();
+          label.text.plainText = newText;
           label.position = newPosition;
         });
       }
@@ -215,8 +246,6 @@ function createToolMode() {
     onToolDragEnd(_, event) {
       if (curveInteraction) {
         const [update, stop] = curveInteraction;
-        // Perform a final update when the drag ends
-        // This gets us the final line item
         update(curve => {
           if (linePoints === null) return;
           curve.points = [
@@ -227,10 +256,6 @@ function createToolMode() {
             ),
           ];
         });
-        // Add the line to the scene
-        // OBR.scene.items.addItems([line]);
-        // Make sure we stop the interaction so others
-        // can interact with our new line
         stop();
       }
       if (labelInteraction) {
@@ -239,9 +264,6 @@ function createToolMode() {
       }
       if (itemInteraction) {
         const [update, stop] = itemInteraction;
-        // Perform a final update when the drag ends
-        // This gets us the final line item
-
         const item = update(item => {
           if (linePoints === null) return;
           item.position = calculateSegmentEndPosition(
@@ -250,20 +272,13 @@ function createToolMode() {
           );
         });
 
-        // Add the line to the scene
+        // Overwrite the initial item with a new item with the correct position
         OBR.scene.items.addItems([item]);
-        // Make sure we stop the interaction so others
-        // can interact with our new line
+
         stop();
       }
 
-      // Reset state
-      curveInteraction = null;
-      labelInteraction = null;
-      itemInteraction = null;
-      interactedItem = null;
-      linePoints = null;
-      pointerPosition = null;
+      resetState();
     },
     onToolDragCancel() {
       // Stop the interaction early if we cancel the drag
@@ -279,19 +294,13 @@ function createToolMode() {
       }
       if (itemInteraction) {
         const [_, stop] = itemInteraction;
-        if (interactedItem !== null) OBR.scene.items.addItems([interactedItem]);
+        if (initialInteractedItem !== null)
+          OBR.scene.items.addItems([initialInteractedItem]);
         stop();
       }
 
-      // Reset state
-      curveInteraction = null;
-      labelInteraction = null;
-      itemInteraction = null;
-      interactedItem = null;
-      linePoints = null;
-      pointerPosition = null;
+      resetState();
     },
-    //this prevents on drag start from calling
     preventDrag: {
       target: [
         { key: "layer", value: "CHARACTER", operator: "!=", coordinator: "&&" },
@@ -309,6 +318,7 @@ function calculateDisplayDistance(points: Vector2[]): string {
       Math.abs(Math.round((points[i].x - points[i - 1].x) / gridDpi)),
       Math.abs(Math.round((points[i].y - points[i - 1].y) / gridDpi))
     );
+    // distance += await OBR.scene.grid.getDistance(points[i], points[i - 1]); // takes too long
   }
   return `${distance * gridScale.parsed.multiplier}${gridScale.parsed.unit}`;
 }
