@@ -1,5 +1,7 @@
 # Measure++
 
+Install link: https://owlbear-measure.onrender.com/manifest.json
+
 Currently only works with chessboard square grid.
 
 How it works:
