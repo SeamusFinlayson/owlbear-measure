@@ -1,5 +1,6 @@
 import OBR, {
   Curve,
+  GridMeasurement,
   GridScale,
   Image,
   InteractionManager,
@@ -15,9 +16,9 @@ import OBR, {
 } from "@owlbear-rodeo/sdk";
 import { getPluginId } from "./getPluginId";
 
-const toolIcon = new URL("./vite.svg#icon", import.meta.url).toString();
-const toolId = getPluginId("tool");
-const modeId = getPluginId("mode");
+const toolIcon = new URL("./toolIcon.svg#icon", import.meta.url).toString();
+const TOOL_ID = getPluginId("tool");
+const DRAG_MODE_ID = getPluginId("dragMode");
 
 let gridDpi: number = 150;
 let gridScale: GridScale = {
@@ -28,9 +29,9 @@ let gridScale: GridScale = {
     digits: 0,
   },
 };
+let gridMeasurement: GridMeasurement = "CHEBYSHEV";
 
 OBR.onReady(async () => {
-  console.log("OBR ready");
   setUpWhenSceneReady();
 });
 
@@ -38,6 +39,7 @@ async function setUpWhenSceneReady() {
   const start = async () => {
     gridDpi = await OBR.scene.grid.getDpi();
     gridScale = await OBR.scene.grid.getScale();
+    gridMeasurement = await OBR.scene.grid.getMeasurement();
     startCallbacks();
 
     createTool();
@@ -63,6 +65,8 @@ async function startCallbacks() {
   const unsubscribeFromGrid = OBR.scene.grid.onChange(async grid => {
     gridDpi = grid.dpi;
     gridScale = await OBR.scene.grid.getScale();
+    gridMeasurement = grid.measurement;
+
     console.log("update");
   });
 
@@ -78,11 +82,11 @@ async function startCallbacks() {
 
 function createTool() {
   OBR.tool.create({
-    id: toolId,
+    id: TOOL_ID,
     icons: [
       {
         icon: toolIcon,
-        label: "Measure++",
+        label: "Segmentable Ruler",
       },
     ],
     shortcut: "Z",
@@ -90,6 +94,7 @@ function createTool() {
 }
 
 function createToolMode() {
+  //Tool state
   let curveInteraction: InteractionManager<Curve> | null = null;
   let labelInteraction: InteractionManager<Label> | null = null;
   let itemInteraction: InteractionManager<Item> | null = null;
@@ -107,15 +112,32 @@ function createToolMode() {
   };
 
   OBR.tool.createMode({
-    id: modeId,
+    id: DRAG_MODE_ID,
     icons: [
       {
         icon: toolIcon,
         label: "Drag Measure",
         filter: {
-          activeTools: [toolId],
+          activeTools: [TOOL_ID],
         },
       },
+    ],
+    cursors: [
+      {
+        cursor: "pointer",
+        filter: {
+          target: [
+            {
+              key: "layer",
+              value: "CHARACTER",
+              operator: "==",
+              coordinator: "||",
+            },
+            { key: "layer", value: "MOUNT", operator: "==" },
+          ],
+        },
+      },
+      { cursor: "move" },
     ],
     onToolDragStart: async (_context: ToolContext, event: ToolEvent) => {
       pointerPosition = event.pointerPosition;
@@ -161,6 +183,7 @@ function createToolMode() {
     onToolDragMove: async (_context: ToolContext, event: ToolEvent) => {
       pointerPosition = event.pointerPosition;
 
+      // Calculate new position
       if (linePoints === null) return;
       const newPosition = calculateSegmentEndPosition(
         linePoints[linePoints.length - 1],
@@ -199,9 +222,10 @@ function createToolMode() {
       }
     },
     onKeyDown: (_context: ToolContext, event: KeyEvent) => {
+      if (linePoints === null) return;
+      if (pointerPosition === null) return;
+
       if (event.code === "KeyZ") {
-        if (linePoints === null) return;
-        if (pointerPosition === null) return;
         linePoints.push(
           calculateSegmentEndPosition(
             linePoints[linePoints.length - 1],
@@ -209,7 +233,7 @@ function createToolMode() {
           )
         );
       }
-      if (linePoints === null) return;
+
       if (event.code === "KeyX" && linePoints.length > 1) {
         linePoints.pop();
         if (curveInteraction) {
@@ -226,21 +250,22 @@ function createToolMode() {
             ];
           });
         }
-      }
-      if (labelInteraction) {
-        const [update] = labelInteraction;
-        update(label => {
-          if (linePoints === null) return;
-          if (pointerPosition === null) return;
-          label.text.plainText = calculateDisplayDistance([
-            ...linePoints,
-            pointerPosition,
-          ]).toString();
-          label.position = calculateSegmentEndPosition(
-            linePoints[0],
-            pointerPosition
-          );
-        });
+
+        if (labelInteraction) {
+          const [update] = labelInteraction;
+          update(label => {
+            if (linePoints === null) return;
+            if (pointerPosition === null) return;
+            label.text.plainText = calculateDisplayDistance([
+              ...linePoints,
+              pointerPosition,
+            ]).toString();
+            label.position = calculateSegmentEndPosition(
+              linePoints[0],
+              pointerPosition
+            );
+          });
+        }
       }
     },
     onToolDragEnd(_, event) {
@@ -281,9 +306,7 @@ function createToolMode() {
       resetState();
     },
     onToolDragCancel() {
-      // Stop the interaction early if we cancel the drag
-      // This can happen if the user presses `esc` in the middle
-      // of a drag operation
+      // End interactions
       if (curveInteraction) {
         const [_, stop] = curveInteraction;
         stop();
@@ -310,15 +333,60 @@ function createToolMode() {
   });
 }
 
-// Chessboard (D&D 5E) measurement
 function calculateDisplayDistance(points: Vector2[]): string {
+  if (gridMeasurement === "CHEBYSHEV") {
+    let distance = 0;
+    for (let i = 1; i < points.length; i++) {
+      distance += Math.max(
+        Math.abs(Math.round((points[i].x - points[i - 1].x) / gridDpi)),
+        Math.abs(Math.round((points[i].y - points[i - 1].y) / gridDpi))
+      );
+    }
+    return `${distance * gridScale.parsed.multiplier}${gridScale.parsed.unit}`;
+  }
+
+  if (gridMeasurement === "ALTERNATING") {
+    let distance = 0;
+    for (let i = 1; i < points.length; i++) {
+      const vertical = Math.abs(
+        Math.round((points[i].y - points[i - 1].y) / gridDpi)
+      );
+      const horizontal = Math.abs(
+        Math.round((points[i].x - points[i - 1].x) / gridDpi)
+      );
+      const longEdge = Math.max(vertical, horizontal);
+      const shortEdge = Math.min(vertical, horizontal);
+      const diagonals = longEdge - (longEdge - shortEdge);
+      const diagonalCost = Math.floor(diagonals * 0.5);
+      distance += longEdge + diagonalCost;
+    }
+    return `${distance * gridScale.parsed.multiplier}${gridScale.parsed.unit}`;
+  }
+
+  if (gridMeasurement === "EUCLIDEAN") {
+    let distance = 0;
+    for (let i = 1; i < points.length; i++) {
+      const vertical =
+        Math.abs(Math.round((points[i].y - points[i - 1].y) / gridDpi)) *
+        gridScale.parsed.multiplier;
+      const horizontal =
+        Math.abs(Math.round((points[i].x - points[i - 1].x) / gridDpi)) *
+        gridScale.parsed.multiplier;
+      distance += Math.sqrt(vertical ** 2 + horizontal ** 2);
+    }
+    return `${Math.round(distance)}${gridScale.parsed.unit}`;
+  }
+
+  // grid measurement is MANHATTAN
   let distance = 0;
   for (let i = 1; i < points.length; i++) {
-    distance += Math.max(
-      Math.abs(Math.round((points[i].x - points[i - 1].x) / gridDpi)),
-      Math.abs(Math.round((points[i].y - points[i - 1].y) / gridDpi))
+    const vertical = Math.abs(
+      Math.round((points[i].y - points[i - 1].y) / gridDpi)
     );
-    // distance += await OBR.scene.grid.getDistance(points[i], points[i - 1]); // takes too long
+    const horizontal = Math.abs(
+      Math.round((points[i].x - points[i - 1].x) / gridDpi)
+    );
+    distance += vertical + horizontal;
   }
   return `${distance * gridScale.parsed.multiplier}${gridScale.parsed.unit}`;
 }
@@ -338,13 +406,19 @@ function calculateSegmentEndPosition(
 }
 
 function calculateStartPosition(token: Image): Vector2 {
-  const nearestCenter = {
-    x: Math.round((token.position.x + 75) / gridDpi) * gridDpi - 75,
-    y: Math.round((token.position.y + 75) / gridDpi) * gridDpi - 75,
-  };
   const nearestVertex = {
     x: Math.round(token.position.x / gridDpi) * gridDpi,
     y: Math.round(token.position.y / gridDpi) * gridDpi,
+  };
+  // Centers are offset from vertices by half a cell
+  const halfGridDpi = gridDpi * 0.5;
+  const nearestCenter = {
+    x:
+      Math.round((token.position.x + halfGridDpi) / gridDpi) * gridDpi -
+      halfGridDpi,
+    y:
+      Math.round((token.position.y + halfGridDpi) / gridDpi) * gridDpi -
+      halfGridDpi,
   };
   if (
     distance(token.position, nearestVertex) <
