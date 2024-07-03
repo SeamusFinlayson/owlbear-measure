@@ -1,8 +1,8 @@
 # Segmentable Ruler
 
-![Segmentable Ruler Header](https://github.com/SeamusFinlayson/owlbear-measure/assets/77430559/b4e78996-7990-43fa-85d8-709abd25636e)
+_A ruler for measuring segmented paths in Owlbear Rodeo_
 
-_A ruler for drawing segmented paths_
+![Segmentable Ruler Header](https://github.com/SeamusFinlayson/owlbear-measure/assets/77430559/b4e78996-7990-43fa-85d8-709abd25636e)
 
 Install link: https://owlbear-measure.onrender.com/manifest.json
 
