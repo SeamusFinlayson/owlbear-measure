@@ -377,7 +377,7 @@ function calculateDisplayDistance(points: Vector2[]): string {
     return `${Math.round(distance)}${gridScale.parsed.unit}`;
   }
 
-  // grid measurement is MANHATTAN
+  // gridMeasurement is MANHATTAN
   let distance = 0;
   for (let i = 1; i < points.length; i++) {
     const vertical = Math.abs(
