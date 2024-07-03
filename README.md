@@ -2,9 +2,9 @@
 
 ![Segmentable Ruler Header](https://github.com/SeamusFinlayson/owlbear-measure/assets/77430559/b4e78996-7990-43fa-85d8-709abd25636e)
 
-Install link: https://owlbear-measure.onrender.com/manifest.json
-
 _A ruler for drawing segmented paths_
+
+Install link: https://owlbear-measure.onrender.com/manifest.json
 
 ## Features
 
