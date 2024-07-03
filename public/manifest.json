@@ -4,7 +4,7 @@
   "manifest_version": 1,
   "author": "Seamus Finlayson",
   "homepage_url": "https://github.com/SeamusFinlayson/owlbear-measure",
-  "description": "A ruler for drawing segmented paths",
+  "description": "A ruler for measuring segmented paths",
   "icon": "/logo.svg",
   "background_url": "/"
 }

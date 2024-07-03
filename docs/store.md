@@ -1,6 +1,6 @@
 ---
 title: Segmentable Ruler
-description: A ruler for drawing segmented paths
+description: A ruler for measuring segmented paths
 author: Seamus Finlayson
 image: https://github.com/SeamusFinlayson/owlbear-measure/assets/77430559/b4e78996-7990-43fa-85d8-709abd25636e
 icon: https://owlbear-measure.onrender.com/logo.svg
@@ -12,7 +12,7 @@ learn-more: https://github.com/SeamusFinlayson/owlbear-measure
 
 # Segmentable Ruler
 
-_A ruler for drawing segmented paths_
+_A ruler for measuring segmented paths_
 
 ## Features
 
