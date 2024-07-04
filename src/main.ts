@@ -1,16 +1,14 @@
 import OBR, {
-  Curve,
   InteractionManager,
   Item,
-  KeyEvent,
-  Label,
-  ToolContext,
-  ToolEvent,
+  KeyFilter,
   ToolModeFilter,
   Vector2,
   buildCurve,
   buildLabel,
+  isCurve,
   isImage,
+  isLabel,
 } from "@owlbear-rodeo/sdk";
 import { getPluginId } from "./getPluginId";
 import {
@@ -98,39 +96,24 @@ function createTool() {
 }
 
 function createToolMode(grid: Grid) {
-  // Interactions
-  let curveInteraction: InteractionManager<Curve> | null = null;
-  let labelInteraction: InteractionManager<Label> | null = null;
-  let itemInteraction: InteractionManager<Item> | null = null;
+  let itemInteraction: InteractionManager<Item[]> | null = null;
+  let interactionIsExpired = false;
 
-  // Track interaction state
-  let curveIsExpired = false;
-  let labelIsExpired = false;
-  let itemIsExpired = false;
+  // Ruler item IDs
+  const RULER_LINE_ID = getPluginId("rulerLineId");
+  const RULER_LABEL_ID = getPluginId("measureLabelId");
 
   // Set flags to reset interactions
   const expireAllInteractions = () => {
-    curveIsExpired = true;
-    labelIsExpired = true;
-    itemIsExpired = true;
+    interactionIsExpired = true;
   };
 
   // Act on flags to reset interactions
   const stopExpiredInteractions = () => {
-    if (curveInteraction && curveIsExpired) {
-      curveInteraction[1]();
-      curveInteraction = null;
-      curveIsExpired = false;
-    }
-    if (labelInteraction && labelIsExpired) {
-      labelInteraction[1]();
-      labelInteraction = null;
-      labelIsExpired = false;
-    }
-    if (itemInteraction && itemIsExpired) {
+    if (itemInteraction && interactionIsExpired) {
       itemInteraction[1]();
       itemInteraction = null;
-      itemIsExpired = false;
+      interactionIsExpired = false;
     }
   };
 
@@ -138,9 +121,10 @@ function createToolMode(grid: Grid) {
   let initialInteractedItem: Item | null = null;
   let initialSharedItemAttachments: Item[] = [];
   let initialLocalItemAttachments: Item[] = [];
-  let linePoints: Vector2[] = [];
-  let pointerPosition: Vector2;
+  let rulerPoints: Vector2[] = []; // Points in the line being measured
+  let pointerPosition: Vector2; // Track pointer position so it accessible to keyboard events
 
+  const locked: KeyFilter = { key: "locked", value: true, operator: "==" };
   const invalidTargets: ToolModeFilter = {
     target: [
       {
@@ -150,7 +134,7 @@ function createToolMode(grid: Grid) {
         coordinator: "&&",
       },
       { key: "layer", value: "MOUNT", operator: "!=", coordinator: "||" },
-      { key: "locked", value: true, operator: "==" },
+      locked,
     ],
   };
 
@@ -165,11 +149,26 @@ function createToolMode(grid: Grid) {
         },
       },
     ],
-    cursors: [{ cursor: "move", filter: invalidTargets }, { cursor: "grab" }],
+    cursors: [
+      { cursor: "move", filter: { target: [locked] } },
+      {
+        cursor: "pointer",
+        filter: {
+          target: [
+            {
+              key: "layer",
+              value: "CHARACTER",
+              operator: "!=",
+              coordinator: "&&",
+            },
+            { key: "layer", value: "MOUNT", operator: "!=" },
+          ],
+        },
+      },
+      { cursor: "grab" },
+    ],
     preventDrag: invalidTargets,
-    onToolDragStart: async (_context: ToolContext, event: ToolEvent) => {
-      console.log("start");
-
+    onToolDragStart: async (_, event) => {
       pointerPosition = event.pointerPosition;
       const token = event.target;
 
@@ -181,44 +180,44 @@ function createToolMode(grid: Grid) {
       ) {
         initialInteractedItem = token;
         const startPosition = calculateInitialPosition(grid, token);
-        linePoints = [];
-        linePoints.push(startPosition);
+        rulerPoints = [];
+        rulerPoints.push(startPosition);
 
         [
-          curveInteraction,
-          labelInteraction,
           itemInteraction,
           initialSharedItemAttachments,
           initialLocalItemAttachments,
         ] = await Promise.all([
           OBR.interaction.startItemInteraction(
-            buildCurve()
-              .points(linePoints)
-              .strokeColor("white")
-              .fillOpacity(0)
-              .strokeColor("gray")
-              .strokeWidth(grid.dpi / 10)
-              .strokeDash([grid.dpi / 5])
-              .tension(0)
-              .visible(token.visible)
-              .layer("RULER")
-              .build()
+            [
+              buildCurve()
+                .points(rulerPoints)
+                .strokeColor("grey")
+                .fillOpacity(0)
+                .strokeWidth(grid.dpi / 10)
+                .strokeDash([grid.dpi / 5])
+                .tension(0)
+                .visible(token.visible)
+                .layer("RULER")
+                .id(RULER_LINE_ID)
+                .build(),
+              buildLabel()
+                .position(startPosition)
+                .plainText(
+                  calculateDisplayDistance(grid, [
+                    startPosition,
+                    event.pointerPosition,
+                  ]).toString()
+                )
+                .pointerHeight(0)
+                .visible(token.visible)
+                .layer("RULER")
+                .id(RULER_LABEL_ID)
+                .build(),
+              token,
+            ],
+            false
           ),
-          OBR.interaction.startItemInteraction(
-            buildLabel()
-              .position(startPosition)
-              .plainText(
-                calculateDisplayDistance(grid, [
-                  startPosition,
-                  event.pointerPosition,
-                ]).toString()
-              )
-              .pointerHeight(0)
-              .visible(token.visible)
-              .layer("RULER")
-              .build()
-          ),
-          OBR.interaction.startItemInteraction(token, false),
           OBR.scene.items.getItemAttachments([token.id]),
           OBR.scene.local.getItemAttachments([token.id]),
         ]);
@@ -228,166 +227,80 @@ function createToolMode(grid: Grid) {
         stopExpiredInteractions();
       }
     },
-    onToolDragMove: (_context: ToolContext, event: ToolEvent) => {
+    onToolDragMove: (_, event) => {
       if (initialInteractedItem) {
-        console.log("move");
-
         pointerPosition = event.pointerPosition;
-
-        // Calculate new position
-        const newPosition = calculateSegmentEndPosition(
-          grid,
-          linePoints[linePoints.length - 1],
-          event.pointerPosition
-        );
-
-        // Update item position
-        if (itemInteraction) {
-          const [update] = itemInteraction;
-          update(item => {
-            item.position = newPosition;
-          });
-        }
-
-        // Update path drawing
-        if (curveInteraction) {
-          const [update] = curveInteraction;
-          update(curve => {
-            curve.points = [...linePoints, newPosition];
-          });
-        }
-
-        // Update label text and position
-        if (labelInteraction) {
-          const [update] = labelInteraction;
-          const newText = calculateDisplayDistance(grid, [
-            ...linePoints,
-            event.pointerPosition,
-          ]).toString();
-          update(label => {
-            label.text.plainText = newText;
-            label.position = newPosition;
-          });
-        }
+        updateToolItems();
       }
     },
-    onKeyDown: (_context: ToolContext, event: KeyEvent) => {
+    onKeyDown: (_, event) => {
       if (initialInteractedItem) {
         if (event.code === "KeyZ") {
           // Add segment
-          linePoints.push(
+          rulerPoints.push(
             calculateSegmentEndPosition(
               grid,
-              linePoints[linePoints.length - 1],
+              rulerPoints[rulerPoints.length - 1],
               pointerPosition
             )
           );
         }
 
-        if (event.code === "KeyX" && linePoints.length > 1) {
+        if (event.code === "KeyX" && rulerPoints.length > 1) {
           // Remove most recent segment
-          linePoints.pop();
-
-          // Update curve
-          if (curveInteraction) {
-            const [update] = curveInteraction;
-            update(curve => {
-              curve.points = [
-                ...linePoints,
-                calculateSegmentEndPosition(
-                  grid,
-                  linePoints[linePoints.length - 1],
-                  pointerPosition
-                ),
-              ];
-            });
-          }
-
-          // Update label
-          if (labelInteraction) {
-            const [update] = labelInteraction;
-            update(label => {
-              label.text.plainText = calculateDisplayDistance(grid, [
-                ...linePoints,
-                pointerPosition,
-              ]).toString();
-              label.position = calculateSegmentEndPosition(
-                grid,
-                linePoints[0],
-                pointerPosition
-              );
-            });
-          }
+          rulerPoints.pop();
+          // Refresh with segment removed
+          updateToolItems();
         }
       }
     },
-    async onToolDragEnd(_, event) {
+    onToolDragEnd: (_, event) => {
       if (initialInteractedItem) {
-        console.log("end");
-
-        // TODO: idk if this does anything, maybe get rid of it
-        if (curveInteraction) {
-          const [update] = curveInteraction;
-          update(curve => {
-            curve.points = [
-              ...linePoints,
-              calculateSegmentEndPosition(
-                grid,
-                linePoints[linePoints.length - 1],
-                event.pointerPosition
-              ),
-            ];
-          });
-        }
         if (itemInteraction) {
-          const [update] = itemInteraction;
-          const item = update(item => {
-            item.position = calculateSegmentEndPosition(
-              grid,
-              linePoints[linePoints.length - 1],
-              event.pointerPosition
-            );
-          });
+          updateToolItems();
 
-          // Overwrite the initial item with a new item with the correct position
-          OBR.scene.items.addItems([item]);
+          const newPosition = calculateSegmentEndPosition(
+            grid,
+            rulerPoints[rulerPoints.length - 1],
+            event.pointerPosition
+          );
 
-          // Calculate position change
           const positionChange = {
-            x: item.position.x - initialInteractedItem.position.x,
-            y: item.position.y - initialInteractedItem.position.y,
+            x: newPosition.x - initialInteractedItem.position.x,
+            y: newPosition.y - initialInteractedItem.position.y,
           };
 
-          // Update shared attachments
+          // Update dragged item and shared attachments
           for (let i = 0; i < initialSharedItemAttachments.length; i++) {
-            if (initialSharedItemAttachments[i].id === item.id) {
-              initialSharedItemAttachments.splice(i, 1);
-            }
-            if (i < initialSharedItemAttachments.length) {
-              initialSharedItemAttachments[i].position.x += positionChange.x;
-              initialSharedItemAttachments[i].position.y += positionChange.y;
-            }
+            initialSharedItemAttachments[i].position.x += positionChange.x;
+            initialSharedItemAttachments[i].position.y += positionChange.y;
           }
           OBR.scene.items.addItems(initialSharedItemAttachments);
 
           // Update local attachments
           for (let i = 0; i < initialLocalItemAttachments.length; i++) {
-            if (i < initialLocalItemAttachments.length) {
-              initialLocalItemAttachments[i].position.x += positionChange.x;
-              initialLocalItemAttachments[i].position.y += positionChange.y;
-            }
+            initialLocalItemAttachments[i].position.x += positionChange.x;
+            initialLocalItemAttachments[i].position.y += positionChange.y;
           }
           OBR.scene.local.addItems(initialLocalItemAttachments);
         }
-      }
 
-      expireAllInteractions();
-      stopExpiredInteractions();
-      initialInteractedItem = null;
+        expireAllInteractions();
+        stopExpiredInteractions();
+        initialInteractedItem = null;
+      }
     },
-    onToolDragCancel() {
+    onToolDragCancel: () => {
       if (initialInteractedItem) {
-        console.log("cancel");
+        // Fix bug where token is not locally displayed at its initial position on cancel
+        if (itemInteraction) {
+          itemInteraction[0](items => {
+            items.forEach(item => {
+              if (initialInteractedItem && item.id === initialInteractedItem.id)
+                item.position = initialInteractedItem.position;
+            });
+          });
+        }
 
         expireAllInteractions();
         stopExpiredInteractions();
@@ -395,4 +308,32 @@ function createToolMode(grid: Grid) {
       }
     },
   });
+
+  function updateToolItems() {
+    const newPosition = calculateSegmentEndPosition(
+      grid,
+      rulerPoints[rulerPoints.length - 1],
+      pointerPosition
+    );
+
+    const newText = calculateDisplayDistance(grid, [
+      ...rulerPoints,
+      pointerPosition,
+    ]).toString();
+
+    if (itemInteraction) {
+      itemInteraction[0](items => {
+        items.forEach(item => {
+          if (initialInteractedItem && item.id === initialInteractedItem.id) {
+            item.position = newPosition;
+          } else if (item.id === RULER_LINE_ID && isCurve(item)) {
+            item.points = [...rulerPoints, newPosition];
+          } else if (item.id === RULER_LABEL_ID && isLabel(item)) {
+            item.position = newPosition;
+            item.text.plainText = newText;
+          }
+        });
+      });
+    }
+  }
 }
