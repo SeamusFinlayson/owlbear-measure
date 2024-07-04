@@ -47,11 +47,14 @@ async function startWhenSceneIsReady() {
 }
 
 async function start() {
-  const grid = createGrid(
+  const [dpi, type, measurement, scale] = await Promise.all([
     await OBR.scene.grid.getDpi(),
+    await OBR.scene.grid.getType(),
+    await OBR.scene.grid.getMeasurement(),
     await OBR.scene.grid.getScale(),
-    await OBR.scene.grid.getMeasurement()
-  );
+  ]);
+
+  const grid = createGrid(dpi, type, measurement, scale);
 
   startCallbacks(grid);
   createTool();
@@ -66,8 +69,9 @@ async function startCallbacks(grid: Grid) {
     const unsubscribeFromGrid = OBR.scene.grid.onChange(async newGrid => {
       grid.update(
         newGrid.dpi,
-        await OBR.scene.grid.getScale(),
-        newGrid.measurement
+        newGrid.type,
+        newGrid.measurement,
+        await OBR.scene.grid.getScale()
       );
     });
 
@@ -123,7 +127,9 @@ function createToolMode(grid: Grid) {
   let initialLocalItemAttachments: Item[] = [];
   let rulerPoints: Vector2[] = []; // Points in the line being measured
   let pointerPosition: Vector2; // Track pointer position so it accessible to keyboard events
+  let lastPosition: Vector2; // Memoize last position the token snapped to to prevent path measurement recalculation
 
+  //TODO: Fix dragging and cursor on grid with no map
   const locked: KeyFilter = { key: "locked", value: true, operator: "==" };
   const invalidTargets: ToolModeFilter = {
     target: [
@@ -134,8 +140,9 @@ function createToolMode(grid: Grid) {
         coordinator: "&&",
       },
       { key: "layer", value: "MOUNT", operator: "!=", coordinator: "||" },
-      locked,
+      { key: "locked", value: true, operator: "==" },
     ],
+    dragging: true,
   };
 
   OBR.tool.createMode({
@@ -179,7 +186,8 @@ function createToolMode(grid: Grid) {
         (token.layer == "CHARACTER" || token.layer === "MOUNT")
       ) {
         initialInteractedItem = token;
-        const startPosition = calculateInitialPosition(grid, token);
+        const startPosition = await calculateInitialPosition(grid, token);
+        lastPosition = startPosition;
         rulerPoints = [];
         rulerPoints.push(startPosition);
 
@@ -204,10 +212,10 @@ function createToolMode(grid: Grid) {
               buildLabel()
                 .position(startPosition)
                 .plainText(
-                  calculateDisplayDistance(grid, [
+                  await calculateDisplayDistance(grid, [
                     startPosition,
-                    event.pointerPosition,
-                  ]).toString()
+                    startPosition,
+                  ])
                 )
                 .pointerHeight(0)
                 .visible(token.visible)
@@ -233,12 +241,12 @@ function createToolMode(grid: Grid) {
         updateToolItems();
       }
     },
-    onKeyDown: (_, event) => {
+    onKeyDown: async (_, event) => {
       if (initialInteractedItem) {
         if (event.code === "KeyZ") {
           // Add segment
           rulerPoints.push(
-            calculateSegmentEndPosition(
+            await calculateSegmentEndPosition(
               grid,
               rulerPoints[rulerPoints.length - 1],
               pointerPosition
@@ -254,12 +262,12 @@ function createToolMode(grid: Grid) {
         }
       }
     },
-    onToolDragEnd: (_, event) => {
+    onToolDragEnd: async (_, event) => {
       if (initialInteractedItem) {
         if (itemInteraction) {
           updateToolItems();
 
-          const newPosition = calculateSegmentEndPosition(
+          const newPosition = await calculateSegmentEndPosition(
             grid,
             rulerPoints[rulerPoints.length - 1],
             event.pointerPosition
@@ -309,18 +317,27 @@ function createToolMode(grid: Grid) {
     },
   });
 
-  function updateToolItems() {
-    const newPosition = calculateSegmentEndPosition(
+  async function updateToolItems() {
+    const newPosition = await calculateSegmentEndPosition(
       grid,
       rulerPoints[rulerPoints.length - 1],
       pointerPosition
     );
 
-    const newText = calculateDisplayDistance(grid, [
-      ...rulerPoints,
-      pointerPosition,
-    ]).toString();
+    let updateText = false;
+    let newText: string;
+    if (
+      !(lastPosition.x === newPosition.x && newPosition.y === lastPosition.y)
+    ) {
+      updateText = true;
+      newText = await calculateDisplayDistance(grid, [
+        ...rulerPoints,
+        newPosition,
+      ]);
+    }
+    lastPosition = newPosition;
 
+    // const newText = "hello";
     if (itemInteraction) {
       itemInteraction[0](items => {
         items.forEach(item => {
@@ -330,6 +347,7 @@ function createToolMode(grid: Grid) {
             item.points = [...rulerPoints, newPosition];
           } else if (item.id === RULER_LABEL_ID && isLabel(item)) {
             item.position = newPosition;
+            if (!updateText) newText = item.text.plainText;
             item.text.plainText = newText;
           }
         });
