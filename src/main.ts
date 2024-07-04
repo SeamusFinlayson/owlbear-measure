@@ -2,7 +2,6 @@ import OBR, {
   InteractionManager,
   Item,
   KeyFilter,
-  ToolModeFilter,
   Vector2,
   buildCurve,
   buildLabel,
@@ -129,21 +128,7 @@ function createToolMode(grid: Grid) {
   let pointerPosition: Vector2; // Track pointer position so it accessible to keyboard events
   let lastPosition: Vector2; // Memoize last position the token snapped to to prevent path measurement recalculation
 
-  //TODO: Fix dragging and cursor on grid with no map
-  const locked: KeyFilter = { key: "locked", value: true, operator: "==" };
-  const invalidTargets: ToolModeFilter = {
-    target: [
-      {
-        key: "layer",
-        value: "CHARACTER",
-        operator: "!=",
-        coordinator: "&&",
-      },
-      { key: "layer", value: "MOUNT", operator: "!=", coordinator: "||" },
-      { key: "locked", value: true, operator: "==" },
-    ],
-    dragging: true,
-  };
+  const notLocked: KeyFilter = { key: "locked", value: true, operator: "!=" };
 
   OBR.tool.createMode({
     id: DRAG_MODE_ID,
@@ -157,36 +142,19 @@ function createToolMode(grid: Grid) {
       },
     ],
     cursors: [
-      { cursor: "move", filter: { target: [locked] } },
-      {
-        cursor: "pointer",
-        filter: {
-          target: [
-            {
-              key: "layer",
-              value: "CHARACTER",
-              operator: "!=",
-              coordinator: "&&",
-            },
-            { key: "layer", value: "MOUNT", operator: "!=" },
-          ],
-        },
-      },
-      { cursor: "grab" },
+      { cursor: "grab", filter: { target: [notLocked] } },
+      { cursor: "crosshair" },
     ],
-    preventDrag: invalidTargets,
     onToolDragStart: async (_, event) => {
       pointerPosition = event.pointerPosition;
-      const token = event.target;
 
-      if (
-        token &&
-        isImage(token) &&
-        !token.locked &&
-        (token.layer == "CHARACTER" || token.layer === "MOUNT")
-      ) {
+      const token = event.target;
+      if (token && isImage(token) && !token.locked) {
         initialInteractedItem = token;
-        const startPosition = await calculateInitialPosition(grid, token);
+        const startPosition = await calculateInitialPosition(
+          grid,
+          token.position
+        );
         lastPosition = startPosition;
         rulerPoints = [];
         rulerPoints.push(startPosition);
@@ -229,91 +197,123 @@ function createToolMode(grid: Grid) {
           OBR.scene.items.getItemAttachments([token.id]),
           OBR.scene.local.getItemAttachments([token.id]),
         ]);
+      } else {
+        const startPosition = await calculateInitialPosition(
+          grid,
+          pointerPosition
+        );
+        lastPosition = startPosition;
+        rulerPoints = [];
+        rulerPoints.push(startPosition);
 
-        // Because this function is asynchronous, interactions
-        // may already be expired if the drag was short enough
-        stopExpiredInteractions();
+        [itemInteraction] = await Promise.all([
+          OBR.interaction.startItemInteraction(
+            [
+              buildCurve()
+                .points(rulerPoints)
+                .strokeColor("grey")
+                .fillOpacity(0)
+                .strokeWidth(grid.dpi / 10)
+                .strokeDash([grid.dpi / 5])
+                .tension(0)
+                .visible(true)
+                .layer("RULER")
+                .id(RULER_LINE_ID)
+                .build(),
+              buildLabel()
+                .position(startPosition)
+                .plainText(
+                  await calculateDisplayDistance(grid, [
+                    startPosition,
+                    startPosition,
+                  ])
+                )
+                .pointerHeight(0)
+                .visible(true)
+                .layer("RULER")
+                .id(RULER_LABEL_ID)
+                .build(),
+            ],
+            false
+          ),
+        ]);
       }
+
+      // Because this function is asynchronous, interactions
+      // may already be expired if the drag was short enough
+      stopExpiredInteractions();
     },
     onToolDragMove: (_, event) => {
-      if (initialInteractedItem) {
-        pointerPosition = event.pointerPosition;
+      pointerPosition = event.pointerPosition;
+      updateToolItems();
+    },
+    onKeyDown: async (_, event) => {
+      if (event.code === "KeyZ") {
+        // Add segment
+        rulerPoints.push(
+          await calculateSegmentEndPosition(
+            grid,
+            rulerPoints[rulerPoints.length - 1],
+            pointerPosition
+          )
+        );
+      }
+
+      if (event.code === "KeyX" && rulerPoints.length > 1) {
+        // Remove most recent segment
+        rulerPoints.pop();
+        // Refresh with segment removed
         updateToolItems();
       }
     },
-    onKeyDown: async (_, event) => {
-      if (initialInteractedItem) {
-        if (event.code === "KeyZ") {
-          // Add segment
-          rulerPoints.push(
-            await calculateSegmentEndPosition(
-              grid,
-              rulerPoints[rulerPoints.length - 1],
-              pointerPosition
-            )
-          );
-        }
-
-        if (event.code === "KeyX" && rulerPoints.length > 1) {
-          // Remove most recent segment
-          rulerPoints.pop();
-          // Refresh with segment removed
-          updateToolItems();
-        }
-      }
-    },
     onToolDragEnd: async (_, event) => {
-      if (initialInteractedItem) {
-        if (itemInteraction) {
-          updateToolItems();
+      if (itemInteraction && initialInteractedItem) {
+        updateToolItems();
 
-          const newPosition = await calculateSegmentEndPosition(
-            grid,
-            rulerPoints[rulerPoints.length - 1],
-            event.pointerPosition
-          );
+        const newPosition = await calculateSegmentEndPosition(
+          grid,
+          rulerPoints[rulerPoints.length - 1],
+          event.pointerPosition
+        );
 
-          const positionChange = {
-            x: newPosition.x - initialInteractedItem.position.x,
-            y: newPosition.y - initialInteractedItem.position.y,
-          };
+        const positionChange = {
+          x: newPosition.x - initialInteractedItem.position.x,
+          y: newPosition.y - initialInteractedItem.position.y,
+        };
 
-          // Update dragged item and shared attachments
-          for (let i = 0; i < initialSharedItemAttachments.length; i++) {
-            initialSharedItemAttachments[i].position.x += positionChange.x;
-            initialSharedItemAttachments[i].position.y += positionChange.y;
-          }
-          OBR.scene.items.addItems(initialSharedItemAttachments);
-
-          // Update local attachments
-          for (let i = 0; i < initialLocalItemAttachments.length; i++) {
-            initialLocalItemAttachments[i].position.x += positionChange.x;
-            initialLocalItemAttachments[i].position.y += positionChange.y;
-          }
-          OBR.scene.local.addItems(initialLocalItemAttachments);
+        // Update dragged item and shared attachments
+        for (let i = 0; i < initialSharedItemAttachments.length; i++) {
+          initialSharedItemAttachments[i].position.x += positionChange.x;
+          initialSharedItemAttachments[i].position.y += positionChange.y;
         }
+        OBR.scene.items.addItems(initialSharedItemAttachments);
 
-        expireAllInteractions();
-        stopExpiredInteractions();
-        initialInteractedItem = null;
+        // Update local attachments
+        for (let i = 0; i < initialLocalItemAttachments.length; i++) {
+          initialLocalItemAttachments[i].position.x += positionChange.x;
+          initialLocalItemAttachments[i].position.y += positionChange.y;
+        }
+        OBR.scene.local.addItems(initialLocalItemAttachments);
       }
+
+      expireAllInteractions();
+      stopExpiredInteractions();
+      initialInteractedItem = null;
     },
     onToolDragCancel: () => {
-      if (initialInteractedItem) {
-        // Fix bug where token is not locally displayed at its initial position on cancel
-        if (itemInteraction) {
-          itemInteraction[0](items => {
-            items.forEach(item => {
-              if (initialInteractedItem && item.id === initialInteractedItem.id)
-                item.position = initialInteractedItem.position;
-            });
+      // Fix bug where token is not locally displayed at its initial position on cancel
+      if (itemInteraction) {
+        itemInteraction[0](items => {
+          items.forEach(item => {
+            if (initialInteractedItem && item.id === initialInteractedItem.id)
+              item.position = initialInteractedItem.position;
           });
-        }
-
-        expireAllInteractions();
-        stopExpiredInteractions();
-        initialInteractedItem = null;
+        });
       }
+
+      expireAllInteractions();
+      stopExpiredInteractions();
+      initialInteractedItem = null;
     },
   });
 

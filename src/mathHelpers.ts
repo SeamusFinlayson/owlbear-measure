@@ -2,7 +2,6 @@ import OBR, {
   GridMeasurement,
   GridScale,
   GridType,
-  Image,
   Vector2,
 } from "@owlbear-rodeo/sdk";
 
@@ -151,34 +150,31 @@ export async function calculateSegmentEndPosition(
 
 export async function calculateInitialPosition(
   grid: Grid,
-  token: Image
+  position: Vector2
 ): Promise<Vector2> {
   if (grid.type === "SQUARE") {
     const nearestVertex = {
-      x: Math.round(token.position.x / grid.dpi) * grid.dpi,
-      y: Math.round(token.position.y / grid.dpi) * grid.dpi,
+      x: Math.round(position.x / grid.dpi) * grid.dpi,
+      y: Math.round(position.y / grid.dpi) * grid.dpi,
     };
     // Centers are offset from vertices by half a cell
     const halfGridDpi = grid.dpi * 0.5;
     const nearestCenter = {
       x:
-        Math.round((token.position.x + halfGridDpi) / grid.dpi) * grid.dpi -
+        Math.round((position.x + halfGridDpi) / grid.dpi) * grid.dpi -
         halfGridDpi,
       y:
-        Math.round((token.position.y + halfGridDpi) / grid.dpi) * grid.dpi -
+        Math.round((position.y + halfGridDpi) / grid.dpi) * grid.dpi -
         halfGridDpi,
     };
-    if (
-      distance(token.position, nearestVertex) <
-      distance(token.position, nearestCenter)
-    ) {
+    if (distance(position, nearestVertex) < distance(position, nearestCenter)) {
       return nearestVertex;
     }
     return nearestCenter;
   } else {
     if (grid.measurement === "EUCLIDEAN")
-      return await OBR.scene.grid.snapPosition(token.position, 0);
-    return await OBR.scene.grid.snapPosition(token.position, 1);
+      return await OBR.scene.grid.snapPosition(position, 0);
+    return await OBR.scene.grid.snapPosition(position, 1);
   }
 }
 

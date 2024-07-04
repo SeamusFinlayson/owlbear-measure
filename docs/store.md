@@ -17,7 +17,7 @@ _A ruler for measuring segmented paths_
 ## How it works
 
 - Select the Segmentable Ruler tool in the toolbar
-- Drag a token on the character or mount layer to start measuring
+- Drag a token or select a place in the map to make a measurement
 - Press Z to start a new segment
 - Press X to remove the last last segmentation
 - Release the token to move it to the new position
@@ -28,11 +28,14 @@ _A ruler for measuring segmented paths_
 - Snaps tokens to grid based on token position instead of pointer position
 - Allows for complex paths with many segments to be measured
 - Easy to create new segments and remove unwanted segments
+- Works with all grid types and measurement
+- Hides measurements for hidden tokens
 
 ## Limitations
 
 - Doesn't show measurement value to other users properly
-- Doesn't allow rulers to be created without selecting a token
+- Can't create rulers that remain after releasing the mouse
+- Can't create private measurements
 
 ## Feature Requests
 
