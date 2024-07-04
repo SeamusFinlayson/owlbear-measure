@@ -8,19 +8,19 @@ Install link: https://owlbear-measure.onrender.com/manifest.json
 
 ## How it works
 
-- Select the Segmentable Ruler tool in the toolbar
-- Drag a token or select a place in the map to make a measurement
+- Select the Segmentable Ruler tool in the toolbar or use the shortcut Z
+- Drag a token or select a place on the map to make a measurement
 - Press Z to start a new segment
-- Press X to remove the last last segmentation
-- Release the token to move it to the new position
-- Press escape to return the token to its previous position
+- Press X to remove the last segment
+- Release the token to move it to the current position
+- Press escape to return the token to its initial position
 
 ## Benefits
 
 - Snaps tokens to grid based on token position instead of pointer position
 - Allows for complex paths with many segments to be measured
 - Easy to create new segments and remove unwanted segments
-- Works with all grid types and measurement
+- Works with all grid and measurement types
 - Hides measurements for hidden tokens
 
 ## Limitations
