@@ -1,51 +1,43 @@
 import OBR, {
   Curve,
-  GridMeasurement,
-  GridScale,
-  Image,
   InteractionManager,
   Item,
   KeyEvent,
   Label,
   ToolContext,
   ToolEvent,
+  ToolModeFilter,
   Vector2,
   buildCurve,
   buildLabel,
   isImage,
 } from "@owlbear-rodeo/sdk";
 import { getPluginId } from "./getPluginId";
+import {
+  Grid,
+  calculateDisplayDistance,
+  calculateSegmentEndPosition,
+  calculateInitialPosition,
+  createGrid,
+} from "./mathHelpers";
 
 const toolIcon = new URL("./toolIcon.svg#icon", import.meta.url).toString();
+
 const TOOL_ID = getPluginId("tool");
 const DRAG_MODE_ID = getPluginId("dragMode");
 
-let gridDpi: number = 150;
-let gridScale: GridScale = {
-  raw: "5ft",
-  parsed: {
-    multiplier: 5,
-    unit: "ft",
-    digits: 0,
-  },
-};
-let gridMeasurement: GridMeasurement = "CHEBYSHEV";
-
 OBR.onReady(async () => {
-  setUpWhenSceneReady();
+  printVersionToConsole();
+  startWhenSceneIsReady();
 });
 
-async function setUpWhenSceneReady() {
-  const start = async () => {
-    gridDpi = await OBR.scene.grid.getDpi();
-    gridScale = await OBR.scene.grid.getScale();
-    gridMeasurement = await OBR.scene.grid.getMeasurement();
-    startCallbacks();
+async function printVersionToConsole() {
+  fetch("/manifest.json")
+    .then(response => response.json())
+    .then(json => console.log(json["name"] + " - version: " + json["version"]));
+}
 
-    createTool();
-    createToolMode();
-  };
-
+async function startWhenSceneIsReady() {
   // Handle when the scene is either changed or made ready after extension load
   OBR.scene.onReadyChange(async isReady => {
     if (isReady) start();
@@ -56,28 +48,40 @@ async function setUpWhenSceneReady() {
   if (isReady) start();
 }
 
-let callbacksStarted = false;
-async function startCallbacks() {
+async function start() {
+  const grid = createGrid(
+    await OBR.scene.grid.getDpi(),
+    await OBR.scene.grid.getScale(),
+    await OBR.scene.grid.getMeasurement()
+  );
+
+  startCallbacks(grid);
+  createTool();
+  createToolMode(grid);
+}
+
+async function startCallbacks(grid: Grid) {
+  let callbacksStarted = false;
   if (!callbacksStarted) {
     callbacksStarted = true;
+
+    const unsubscribeFromGrid = OBR.scene.grid.onChange(async newGrid => {
+      grid.update(
+        newGrid.dpi,
+        await OBR.scene.grid.getScale(),
+        newGrid.measurement
+      );
+    });
+
+    // Unsubscribe listeners that rely on the scene if it stops being ready
+    const unsubscribeFromScene = OBR.scene.onReadyChange(isReady => {
+      if (!isReady) {
+        unsubscribeFromGrid();
+        unsubscribeFromScene();
+        callbacksStarted = false;
+      }
+    });
   }
-
-  const unsubscribeFromGrid = OBR.scene.grid.onChange(async grid => {
-    gridDpi = grid.dpi;
-    gridScale = await OBR.scene.grid.getScale();
-    gridMeasurement = grid.measurement;
-
-    console.log("update");
-  });
-
-  // Unsubscribe listeners that rely on the scene if it stops being ready
-  const unsubscribeFromScene = OBR.scene.onReadyChange(isReady => {
-    if (!isReady) {
-      unsubscribeFromGrid();
-      unsubscribeFromScene();
-      callbacksStarted = false;
-    }
-  });
 }
 
 function createTool() {
@@ -93,22 +97,61 @@ function createTool() {
   });
 }
 
-function createToolMode() {
-  //Tool state
+function createToolMode(grid: Grid) {
+  // Interactions
   let curveInteraction: InteractionManager<Curve> | null = null;
   let labelInteraction: InteractionManager<Label> | null = null;
   let itemInteraction: InteractionManager<Item> | null = null;
-  let initialInteractedItem: Item | null = null;
-  let linePoints: Vector2[] | null = null;
-  let pointerPosition: Vector2 | null = null;
 
-  const resetState = () => {
-    curveInteraction = null;
-    labelInteraction = null;
-    itemInteraction = null;
-    initialInteractedItem = null;
-    linePoints = null;
-    pointerPosition = null;
+  // Track interaction state
+  let curveIsExpired = false;
+  let labelIsExpired = false;
+  let itemIsExpired = false;
+
+  // Set flags to reset interactions
+  const expireAllInteractions = () => {
+    curveIsExpired = true;
+    labelIsExpired = true;
+    itemIsExpired = true;
+  };
+
+  // Act on flags to reset interactions
+  const stopExpiredInteractions = () => {
+    if (curveInteraction && curveIsExpired) {
+      curveInteraction[1]();
+      curveInteraction = null;
+      curveIsExpired = false;
+    }
+    if (labelInteraction && labelIsExpired) {
+      labelInteraction[1]();
+      labelInteraction = null;
+      labelIsExpired = false;
+    }
+    if (itemInteraction && itemIsExpired) {
+      itemInteraction[1]();
+      itemInteraction = null;
+      itemIsExpired = false;
+    }
+  };
+
+  // State that doesn't require extra handling
+  let initialInteractedItem: Item | null = null;
+  let initialSharedItemAttachments: Item[] = [];
+  let initialLocalItemAttachments: Item[] = [];
+  let linePoints: Vector2[] = [];
+  let pointerPosition: Vector2;
+
+  const invalidTargets: ToolModeFilter = {
+    target: [
+      {
+        key: "layer",
+        value: "CHARACTER",
+        operator: "!=",
+        coordinator: "&&",
+      },
+      { key: "layer", value: "MOUNT", operator: "!=", coordinator: "||" },
+      { key: "locked", value: true, operator: "==" },
+    ],
   };
 
   OBR.tool.createMode({
@@ -122,313 +165,234 @@ function createToolMode() {
         },
       },
     ],
-    cursors: [
-      {
-        cursor: "pointer",
-        filter: {
-          target: [
-            {
-              key: "layer",
-              value: "CHARACTER",
-              operator: "==",
-              coordinator: "||",
-            },
-            { key: "layer", value: "MOUNT", operator: "==" },
-          ],
-        },
-      },
-      { cursor: "move" },
-    ],
+    cursors: [{ cursor: "move", filter: invalidTargets }, { cursor: "grab" }],
+    preventDrag: invalidTargets,
     onToolDragStart: async (_context: ToolContext, event: ToolEvent) => {
+      console.log("start");
+
       pointerPosition = event.pointerPosition;
       const token = event.target;
-      if (token && isImage(token)) {
+
+      if (
+        token &&
+        isImage(token) &&
+        !token.locked &&
+        (token.layer == "CHARACTER" || token.layer === "MOUNT")
+      ) {
         initialInteractedItem = token;
-        const startPosition = calculateStartPosition(token);
+        const startPosition = calculateInitialPosition(grid, token);
         linePoints = [];
         linePoints.push(startPosition);
 
-        curveInteraction = await OBR.interaction.startItemInteraction(
-          buildCurve()
-            .points([startPosition])
-            .strokeColor("white")
-            .fillOpacity(0)
-            .strokeColor("gray")
-            .strokeWidth(gridDpi / 10)
-            .strokeDash([gridDpi / 5])
-            .tension(0)
-            .visible(token.visible)
-            .layer("RULER")
-            .build()
-        );
+        [
+          curveInteraction,
+          labelInteraction,
+          itemInteraction,
+          initialSharedItemAttachments,
+          initialLocalItemAttachments,
+        ] = await Promise.all([
+          OBR.interaction.startItemInteraction(
+            buildCurve()
+              .points(linePoints)
+              .strokeColor("white")
+              .fillOpacity(0)
+              .strokeColor("gray")
+              .strokeWidth(grid.dpi / 10)
+              .strokeDash([grid.dpi / 5])
+              .tension(0)
+              .visible(token.visible)
+              .layer("RULER")
+              .build()
+          ),
+          OBR.interaction.startItemInteraction(
+            buildLabel()
+              .position(startPosition)
+              .plainText(
+                calculateDisplayDistance(grid, [
+                  startPosition,
+                  event.pointerPosition,
+                ]).toString()
+              )
+              .pointerHeight(0)
+              .visible(token.visible)
+              .layer("RULER")
+              .build()
+          ),
+          OBR.interaction.startItemInteraction(token, false),
+          OBR.scene.items.getItemAttachments([token.id]),
+          OBR.scene.local.getItemAttachments([token.id]),
+        ]);
 
-        labelInteraction = await OBR.interaction.startItemInteraction(
-          buildLabel()
-            .position(startPosition)
-            .plainText(
-              calculateDisplayDistance([
-                ...linePoints,
-                event.pointerPosition,
-              ]).toString()
-            )
-            .pointerHeight(0)
-            .visible(token.visible)
-            .layer("RULER")
-            .build()
-        );
-
-        itemInteraction = await OBR.interaction.startItemInteraction(token);
+        // Because this function is asynchronous, interactions
+        // may already be expired if the drag was short enough
+        stopExpiredInteractions();
       }
     },
-    onToolDragMove: async (_context: ToolContext, event: ToolEvent) => {
-      pointerPosition = event.pointerPosition;
+    onToolDragMove: (_context: ToolContext, event: ToolEvent) => {
+      if (initialInteractedItem) {
+        console.log("move");
 
-      // Calculate new position
-      if (linePoints === null) return;
-      const newPosition = calculateSegmentEndPosition(
-        linePoints[linePoints.length - 1],
-        event.pointerPosition
-      );
+        pointerPosition = event.pointerPosition;
 
-      // Update item position
-      if (itemInteraction) {
-        const [update] = itemInteraction;
-        update(item => {
-          item.position = newPosition;
-        });
-      }
-
-      // Update path drawing
-      if (curveInteraction) {
-        const [update] = curveInteraction;
-        update(curve => {
-          if (linePoints === null) return;
-          curve.points = [...linePoints, newPosition];
-        });
-      }
-
-      // Update label text and position
-      if (labelInteraction) {
-        const [update] = labelInteraction;
-        const newText = calculateDisplayDistance([
-          ...linePoints,
-          event.pointerPosition,
-        ]).toString();
-        update(label => {
-          if (linePoints === null) return;
-          label.text.plainText = newText;
-          label.position = newPosition;
-        });
-      }
-    },
-    onKeyDown: (_context: ToolContext, event: KeyEvent) => {
-      if (linePoints === null) return;
-      if (pointerPosition === null) return;
-
-      if (event.code === "KeyZ") {
-        linePoints.push(
-          calculateSegmentEndPosition(
-            linePoints[linePoints.length - 1],
-            pointerPosition
-          )
+        // Calculate new position
+        const newPosition = calculateSegmentEndPosition(
+          grid,
+          linePoints[linePoints.length - 1],
+          event.pointerPosition
         );
-      }
 
-      if (event.code === "KeyX" && linePoints.length > 1) {
-        linePoints.pop();
+        // Update item position
+        if (itemInteraction) {
+          const [update] = itemInteraction;
+          update(item => {
+            item.position = newPosition;
+          });
+        }
+
+        // Update path drawing
         if (curveInteraction) {
           const [update] = curveInteraction;
           update(curve => {
-            if (linePoints === null) return;
-            if (pointerPosition === null) return;
+            curve.points = [...linePoints, newPosition];
+          });
+        }
+
+        // Update label text and position
+        if (labelInteraction) {
+          const [update] = labelInteraction;
+          const newText = calculateDisplayDistance(grid, [
+            ...linePoints,
+            event.pointerPosition,
+          ]).toString();
+          update(label => {
+            label.text.plainText = newText;
+            label.position = newPosition;
+          });
+        }
+      }
+    },
+    onKeyDown: (_context: ToolContext, event: KeyEvent) => {
+      if (initialInteractedItem) {
+        if (event.code === "KeyZ") {
+          // Add segment
+          linePoints.push(
+            calculateSegmentEndPosition(
+              grid,
+              linePoints[linePoints.length - 1],
+              pointerPosition
+            )
+          );
+        }
+
+        if (event.code === "KeyX" && linePoints.length > 1) {
+          // Remove most recent segment
+          linePoints.pop();
+
+          // Update curve
+          if (curveInteraction) {
+            const [update] = curveInteraction;
+            update(curve => {
+              curve.points = [
+                ...linePoints,
+                calculateSegmentEndPosition(
+                  grid,
+                  linePoints[linePoints.length - 1],
+                  pointerPosition
+                ),
+              ];
+            });
+          }
+
+          // Update label
+          if (labelInteraction) {
+            const [update] = labelInteraction;
+            update(label => {
+              label.text.plainText = calculateDisplayDistance(grid, [
+                ...linePoints,
+                pointerPosition,
+              ]).toString();
+              label.position = calculateSegmentEndPosition(
+                grid,
+                linePoints[0],
+                pointerPosition
+              );
+            });
+          }
+        }
+      }
+    },
+    async onToolDragEnd(_, event) {
+      if (initialInteractedItem) {
+        console.log("end");
+
+        // TODO: idk if this does anything, maybe get rid of it
+        if (curveInteraction) {
+          const [update] = curveInteraction;
+          update(curve => {
             curve.points = [
               ...linePoints,
               calculateSegmentEndPosition(
+                grid,
                 linePoints[linePoints.length - 1],
-                pointerPosition
+                event.pointerPosition
               ),
             ];
           });
         }
-
-        if (labelInteraction) {
-          const [update] = labelInteraction;
-          update(label => {
-            if (linePoints === null) return;
-            if (pointerPosition === null) return;
-            label.text.plainText = calculateDisplayDistance([
-              ...linePoints,
-              pointerPosition,
-            ]).toString();
-            label.position = calculateSegmentEndPosition(
-              linePoints[0],
-              pointerPosition
-            );
-          });
-        }
-      }
-    },
-    onToolDragEnd(_, event) {
-      if (curveInteraction) {
-        const [update, stop] = curveInteraction;
-        update(curve => {
-          if (linePoints === null) return;
-          curve.points = [
-            ...linePoints,
-            calculateSegmentEndPosition(
+        if (itemInteraction) {
+          const [update] = itemInteraction;
+          const item = update(item => {
+            item.position = calculateSegmentEndPosition(
+              grid,
               linePoints[linePoints.length - 1],
               event.pointerPosition
-            ),
-          ];
-        });
-        stop();
-      }
-      if (labelInteraction) {
-        const [_, stop] = labelInteraction;
-        stop();
-      }
-      if (itemInteraction) {
-        const [update, stop] = itemInteraction;
-        const item = update(item => {
-          if (linePoints === null) return;
-          item.position = calculateSegmentEndPosition(
-            linePoints[linePoints.length - 1],
-            event.pointerPosition
-          );
-        });
+            );
+          });
 
-        // Overwrite the initial item with a new item with the correct position
-        OBR.scene.items.addItems([item]);
+          // Overwrite the initial item with a new item with the correct position
+          OBR.scene.items.addItems([item]);
 
-        stop();
+          // Calculate position change
+          const positionChange = {
+            x: item.position.x - initialInteractedItem.position.x,
+            y: item.position.y - initialInteractedItem.position.y,
+          };
+
+          // Update shared attachments
+          for (let i = 0; i < initialSharedItemAttachments.length; i++) {
+            if (initialSharedItemAttachments[i].id === item.id) {
+              initialSharedItemAttachments.splice(i, 1);
+            }
+            if (i < initialSharedItemAttachments.length) {
+              initialSharedItemAttachments[i].position.x += positionChange.x;
+              initialSharedItemAttachments[i].position.y += positionChange.y;
+            }
+          }
+          OBR.scene.items.addItems(initialSharedItemAttachments);
+
+          // Update local attachments
+          for (let i = 0; i < initialLocalItemAttachments.length; i++) {
+            if (i < initialLocalItemAttachments.length) {
+              initialLocalItemAttachments[i].position.x += positionChange.x;
+              initialLocalItemAttachments[i].position.y += positionChange.y;
+            }
+          }
+          OBR.scene.local.addItems(initialLocalItemAttachments);
+        }
       }
 
-      resetState();
+      expireAllInteractions();
+      stopExpiredInteractions();
+      initialInteractedItem = null;
     },
     onToolDragCancel() {
-      // End interactions
-      if (curveInteraction) {
-        const [_, stop] = curveInteraction;
-        stop();
-      }
-      if (labelInteraction) {
-        const [_, stop] = labelInteraction;
-        stop();
-      }
-      if (itemInteraction) {
-        const [_, stop] = itemInteraction;
-        if (initialInteractedItem !== null)
-          OBR.scene.items.addItems([initialInteractedItem]);
-        stop();
-      }
+      if (initialInteractedItem) {
+        console.log("cancel");
 
-      resetState();
-    },
-    preventDrag: {
-      target: [
-        { key: "layer", value: "CHARACTER", operator: "!=", coordinator: "&&" },
-        { key: "layer", value: "MOUNT", operator: "!=" },
-      ],
+        expireAllInteractions();
+        stopExpiredInteractions();
+        initialInteractedItem = null;
+      }
     },
   });
-}
-
-function calculateDisplayDistance(points: Vector2[]): string {
-  if (gridMeasurement === "CHEBYSHEV") {
-    let distance = 0;
-    for (let i = 1; i < points.length; i++) {
-      distance += Math.max(
-        Math.abs(Math.round((points[i].x - points[i - 1].x) / gridDpi)),
-        Math.abs(Math.round((points[i].y - points[i - 1].y) / gridDpi))
-      );
-    }
-    return `${distance * gridScale.parsed.multiplier}${gridScale.parsed.unit}`;
-  }
-
-  if (gridMeasurement === "ALTERNATING") {
-    let distance = 0;
-    for (let i = 1; i < points.length; i++) {
-      const vertical = Math.abs(
-        Math.round((points[i].y - points[i - 1].y) / gridDpi)
-      );
-      const horizontal = Math.abs(
-        Math.round((points[i].x - points[i - 1].x) / gridDpi)
-      );
-      const longEdge = Math.max(vertical, horizontal);
-      const shortEdge = Math.min(vertical, horizontal);
-      const diagonals = longEdge - (longEdge - shortEdge);
-      const diagonalCost = Math.floor(diagonals * 0.5);
-      distance += longEdge + diagonalCost;
-    }
-    return `${distance * gridScale.parsed.multiplier}${gridScale.parsed.unit}`;
-  }
-
-  if (gridMeasurement === "EUCLIDEAN") {
-    let distance = 0;
-    for (let i = 1; i < points.length; i++) {
-      const vertical =
-        Math.abs(Math.round((points[i].y - points[i - 1].y) / gridDpi)) *
-        gridScale.parsed.multiplier;
-      const horizontal =
-        Math.abs(Math.round((points[i].x - points[i - 1].x) / gridDpi)) *
-        gridScale.parsed.multiplier;
-      distance += Math.sqrt(vertical ** 2 + horizontal ** 2);
-    }
-    return `${Math.round(distance)}${gridScale.parsed.unit}`;
-  }
-
-  // gridMeasurement is MANHATTAN
-  let distance = 0;
-  for (let i = 1; i < points.length; i++) {
-    const vertical = Math.abs(
-      Math.round((points[i].y - points[i - 1].y) / gridDpi)
-    );
-    const horizontal = Math.abs(
-      Math.round((points[i].x - points[i - 1].x) / gridDpi)
-    );
-    distance += vertical + horizontal;
-  }
-  return `${distance * gridScale.parsed.multiplier}${gridScale.parsed.unit}`;
-}
-
-function calculateSegmentEndPosition(
-  startPosition: Vector2,
-  endPosition: Vector2
-): Vector2 {
-  return {
-    x:
-      startPosition.x +
-      Math.round((endPosition.x - startPosition.x) / gridDpi) * gridDpi,
-    y:
-      startPosition.y +
-      Math.round((endPosition.y - startPosition.y) / gridDpi) * gridDpi,
-  };
-}
-
-function calculateStartPosition(token: Image): Vector2 {
-  const nearestVertex = {
-    x: Math.round(token.position.x / gridDpi) * gridDpi,
-    y: Math.round(token.position.y / gridDpi) * gridDpi,
-  };
-  // Centers are offset from vertices by half a cell
-  const halfGridDpi = gridDpi * 0.5;
-  const nearestCenter = {
-    x:
-      Math.round((token.position.x + halfGridDpi) / gridDpi) * gridDpi -
-      halfGridDpi,
-    y:
-      Math.round((token.position.y + halfGridDpi) / gridDpi) * gridDpi -
-      halfGridDpi,
-  };
-  if (
-    distance(token.position, nearestVertex) <
-    distance(token.position, nearestCenter)
-  ) {
-    return nearestVertex;
-  }
-  return nearestCenter;
-}
-
-function distance(point1: Vector2, point2: Vector2): number {
-  return Math.sqrt((point2.x - point1.x) ** 2 + (point2.y - point1.y) ** 2);
 }
