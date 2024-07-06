@@ -181,3 +181,13 @@ export async function calculateInitialPosition(
 function distance(point1: Vector2, point2: Vector2): number {
   return Math.sqrt((point2.x - point1.x) ** 2 + (point2.y - point1.y) ** 2);
 }
+
+export function getLabelPosition(
+  grid: Grid,
+  rulerEndPosition: Vector2
+): Vector2 {
+  return {
+    x: rulerEndPosition.x,
+    y: rulerEndPosition.y - grid.dpi / 3,
+  };
+}

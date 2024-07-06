@@ -2,18 +2,27 @@
 
 _A ruler for measuring segmented paths in Owlbear Rodeo_
 
-![Segmentable Ruler Header](https://github.com/SeamusFinlayson/owlbear-measure/assets/77430559/b4e78996-7990-43fa-85d8-709abd25636e)
+![Segmentable Ruler Header](https://github.com/SeamusFinlayson/owlbear-measure/assets/77430559/aeef3835-ac5f-4497-af0c-e8c54bc17cdd)
 
 Install link: https://owlbear-measure.onrender.com/manifest.json
 
 ## How it works
 
-- Select the Segmentable Ruler tool in the toolbar or use the shortcut Z
+**Setup**
+
+- Select the Segmentable Ruler tool in the toolbar or use the shortcut **Z**
+
+**Making a measurement**
+
 - Drag a token or select a place on the map to make a measurement
-- Press Z to start a new segment
-- Press X to remove the last segment
+- Press **Z** to start a new segment
+- Press **X** to remove the last segment
+
+**Finishing a measurement**
+
 - Release the token to move it to the current position
-- Press escape to return the token to its initial position
+- Press **enter** to make the ruler permanent and move the token to the current position
+- Press **escape** to return the token to its initial position
 
 ## Benefits
 
@@ -26,7 +35,6 @@ Install link: https://owlbear-measure.onrender.com/manifest.json
 ## Limitations
 
 - Doesn't show measurement value to other users properly
-- Can't create rulers that remain after releasing the mouse
 - Can't create private measurements
 
 ## Feature Requests
