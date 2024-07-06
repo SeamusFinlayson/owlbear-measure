@@ -1,68 +1,22 @@
-import OBR, {
-  GridMeasurement,
-  GridScale,
-  GridType,
-  Vector2,
-} from "@owlbear-rodeo/sdk";
-
-export interface Grid {
-  dpi: number;
-  type: GridType;
-  measurement: GridMeasurement;
-  scale: GridScale;
-  update: (
-    dpi: number,
-    type: GridType,
-    measurement: GridMeasurement,
-    scale: GridScale
-  ) => void;
-}
-
-export function createGrid(
-  dpi: number,
-  type: GridType,
-  measurement: GridMeasurement,
-  scale: GridScale
-): Grid {
-  const grid: Grid = {
-    dpi: dpi,
-    type: type,
-    measurement: measurement,
-    scale: scale,
-    update: (
-      dpi: number,
-      type: GridType,
-      measurement: GridMeasurement,
-      scale: GridScale
-    ) => {
-      grid.dpi = dpi;
-      grid.type = type;
-      grid.measurement = measurement;
-      grid.scale = scale;
-    },
-  };
-
-  return grid;
-}
+import OBR, { Vector2 } from "@owlbear-rodeo/sdk";
+import { Grid } from "./types";
 
 export async function calculateDisplayDistance(
   grid: Grid,
   points: Vector2[]
 ): Promise<string> {
+  let distance = 0;
+  let scaledDistance = 0;
   if (grid.type === "SQUARE") {
     if (grid.measurement === "CHEBYSHEV") {
-      let distance = 0;
       for (let i = 1; i < points.length; i++) {
         distance += Math.max(
           Math.abs(Math.round((points[i].x - points[i - 1].x) / grid.dpi)),
           Math.abs(Math.round((points[i].y - points[i - 1].y) / grid.dpi))
         );
       }
-      return `${distance * grid.scale.parsed.multiplier}${
-        grid.scale.parsed.unit
-      }`;
+      scaledDistance = distance * grid.scale.parsed.multiplier;
     } else if (grid.measurement === "ALTERNATING") {
-      let distance = 0;
       for (let i = 1; i < points.length; i++) {
         const vertical = Math.abs(
           Math.round((points[i].y - points[i - 1].y) / grid.dpi)
@@ -75,11 +29,8 @@ export async function calculateDisplayDistance(
         const diagonalCost = Math.floor(shortEdge * 0.5);
         distance += longEdge + diagonalCost;
       }
-      return `${distance * grid.scale.parsed.multiplier}${
-        grid.scale.parsed.unit
-      }`;
+      scaledDistance = distance * grid.scale.parsed.multiplier;
     } else if (grid.measurement === "EUCLIDEAN") {
-      let distance = 0;
       for (let i = 1; i < points.length; i++) {
         const vertical =
           Math.abs(Math.round((points[i].y - points[i - 1].y) / grid.dpi)) *
@@ -87,12 +38,12 @@ export async function calculateDisplayDistance(
         const horizontal =
           Math.abs(Math.round((points[i].x - points[i - 1].x) / grid.dpi)) *
           grid.scale.parsed.multiplier;
-        distance += Math.sqrt(vertical ** 2 + horizontal ** 2);
+        scaledDistance += Math.sqrt(vertical ** 2 + horizontal ** 2);
       }
-      return `${Math.round(distance)}${grid.scale.parsed.unit}`;
+      distance = Math.floor(scaledDistance / grid.scale.parsed.multiplier);
+      scaledDistance = Math.floor(scaledDistance);
     } else {
       // grid.measurement is MANHATTAN
-      let distance = 0;
       for (let i = 1; i < points.length; i++) {
         const vertical = Math.abs(
           Math.round((points[i].y - points[i - 1].y) / grid.dpi)
@@ -102,9 +53,7 @@ export async function calculateDisplayDistance(
         );
         distance += vertical + horizontal;
       }
-      return `${distance * grid.scale.parsed.multiplier}${
-        grid.scale.parsed.unit
-      }`;
+      scaledDistance = distance * grid.scale.parsed.multiplier;
     }
   } else {
     const getDistances: Promise<number>[] = [];
@@ -121,10 +70,20 @@ export async function calculateDisplayDistance(
       totalDistance += distance;
     });
 
-    return `${Math.round(totalDistance * grid.scale.parsed.multiplier)}${
-      grid.scale.parsed.unit
-    }`;
+    if (grid.measurement === "EUCLIDEAN") {
+      distance = Math.trunc(totalDistance);
+      scaledDistance = Math.trunc(totalDistance * grid.scale.parsed.multiplier);
+    } else {
+      distance = Math.round(totalDistance);
+      scaledDistance = Math.round(totalDistance * grid.scale.parsed.multiplier);
+    }
   }
+
+  // return `${distance}sq`;
+  return `${scaledDistance}${grid.scale.parsed.unit}`;
+  // return `Scaled distance: ${scaledDistance}${grid.scale.parsed.unit}
+  // Distance: ${distance}sq`;
+  // return `${scaledDistance}${grid.scale.parsed.unit}\n${distance}sq`;
 }
 
 export async function calculateSegmentEndPosition(
@@ -188,6 +147,6 @@ export function getLabelPosition(
 ): Vector2 {
   return {
     x: rulerEndPosition.x,
-    y: rulerEndPosition.y - grid.dpi / 3,
+    y: rulerEndPosition.y - grid.dpi / 2,
   };
 }
