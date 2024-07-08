@@ -179,7 +179,6 @@ export function createDragMeasureMode(grid: Grid, player: Player) {
               }
             }
           }
-          console.log(ruler.length);
           OBR.scene.items.addItems(ruler);
 
           expireAllInteractions();
