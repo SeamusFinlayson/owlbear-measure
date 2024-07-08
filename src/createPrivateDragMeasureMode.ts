@@ -7,7 +7,7 @@ import OBR, {
 } from "@owlbear-rodeo/sdk";
 import { privateRulerIcon } from "./icons";
 import {
-  calculateInitialPosition,
+  snapPosition,
   calculateSegmentEndPosition,
   calculateDisplayDistance,
   getLabelPosition,
@@ -20,16 +20,11 @@ export function createPrivateDragMeasureMode(grid: Grid, player: Player) {
   let dragStarted = false;
   let interactionIsExpired = false;
 
-  // Ruler item IDs
-  const RULER_LINE_ID = getItemId("line", player.id, true);
-  const RULER_BACKGROUND_ID = getItemId("background", player.id, true);
-  const RULER_LABEL_ID = getItemId("label", player.id, true);
-  const RULER_END_DOT_ID = getItemId("end-point", player.id, true);
   const rulerIds: RulerIds = {
-    background: RULER_BACKGROUND_ID,
-    line: RULER_LINE_ID,
-    label: RULER_LABEL_ID,
-    endDot: RULER_END_DOT_ID,
+    background: getItemId("background", player.id, true),
+    line: getItemId("line", player.id, true),
+    label: getItemId("label", player.id, true),
+    endDot: getItemId("end-point", player.id, true),
   };
 
   // Set flags to reset interactions
@@ -72,9 +67,7 @@ export function createPrivateDragMeasureMode(grid: Grid, player: Player) {
       pointerPosition = event.pointerPosition;
       dragStarted = true;
 
-      // OBR.scene.items.deleteItems(rulerIds);
-
-      const startPosition = await calculateInitialPosition(
+      const startPosition = await snapPosition(
         grid,
         event.target && isImage(event.target) && !event.target.locked
           ? event.target.position
@@ -85,7 +78,15 @@ export function createPrivateDragMeasureMode(grid: Grid, player: Player) {
       lastPosition = startPosition;
 
       OBR.scene.local.addItems(
-        await buildRuler(rulerIds, grid, player, startPosition, true, true)
+        await buildRuler(
+          rulerIds,
+          grid,
+          player,
+          startPosition,
+          await snapPosition(grid, pointerPosition),
+          true,
+          true
+        )
       );
 
       // Because this function is asynchronous, interactions
@@ -154,13 +155,13 @@ export function createPrivateDragMeasureMode(grid: Grid, player: Player) {
         Object.values(rulerIds),
         items => {
           items.forEach(item => {
-            if (item.id === RULER_LINE_ID && isCurve(item)) {
+            if (item.id === rulerIds.line && isCurve(item)) {
               item.points = [...rulerPoints, newPosition];
-            } else if (item.id === RULER_BACKGROUND_ID && isCurve(item)) {
+            } else if (item.id === rulerIds.background && isCurve(item)) {
               item.points = [...rulerPoints, newPosition];
-            } else if (item.id === RULER_END_DOT_ID && isShape(item)) {
+            } else if (item.id === rulerIds.endDot && isShape(item)) {
               item.position = newPosition;
-            } else if (item.id === RULER_LABEL_ID && isLabel(item)) {
+            } else if (item.id === rulerIds.label && isLabel(item)) {
               item.position = getLabelPosition(grid, newPosition);
               item.text.plainText = labelText;
             }

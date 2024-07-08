@@ -13,13 +13,16 @@ export async function buildRuler(
   grid: Grid,
   player: Player,
   startPosition: Vector2,
+  pointerPosition: Vector2,
   visible: boolean,
   endDot: boolean
 ): Promise<Item[]> {
+  const points = [startPosition, pointerPosition];
+
   const rulerBackground = buildCurve()
     .id(rulerIds.background)
     .attachedTo(rulerIds.label)
-    .points([startPosition])
+    .points(points)
     .strokeColor("white")
     .strokeOpacity(0.2)
     .fillOpacity(0)
@@ -33,7 +36,7 @@ export async function buildRuler(
   const rulerLine = buildCurve()
     .id(rulerIds.line)
     .attachedTo(rulerIds.background)
-    .points([startPosition])
+    .points(points)
     .strokeColor(player.color)
     .fillOpacity(0)
     .strokeWidth(grid.dpi / 15)
@@ -47,10 +50,8 @@ export async function buildRuler(
   const rulerLabel = buildLabel()
     .id(rulerIds.label)
     .attachedTo(rulerIds.line)
-    .position(getLabelPosition(grid, startPosition))
-    .plainText(
-      await calculateDisplayDistance(grid, [startPosition, startPosition])
-    )
+    .position(getLabelPosition(grid, pointerPosition))
+    .plainText(await calculateDisplayDistance(grid, points))
     // .fontFamily("Times New Roman")
     .pointerHeight(0)
     .backgroundOpacity(0.7)
@@ -67,7 +68,7 @@ export async function buildRuler(
     .id(rulerIds.endDot)
     .attachedTo(rulerIds.label)
     .layer("RULER")
-    .position(startPosition)
+    .position(pointerPosition)
     .shapeType("CIRCLE")
     .fillColor(player.color)
     .strokeColor("white")

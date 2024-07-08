@@ -9,7 +9,7 @@ import OBR, {
 } from "@owlbear-rodeo/sdk";
 import { toolIcon } from "./icons";
 import {
-  calculateInitialPosition,
+  snapPosition,
   calculateSegmentEndPosition,
   calculateDisplayDistance,
   getLabelPosition,
@@ -22,18 +22,6 @@ export function createDragMeasureMode(grid: Grid, player: Player) {
   let itemInteraction: InteractionManager<Item[]> | null = null;
   let dragStarted = false;
   let interactionIsExpired = false;
-
-  // Ruler item IDs
-  const RULER_LINE_ID = getItemId("line", player.id);
-  const RULER_BACKGROUND_ID = getItemId("background", player.id);
-  const RULER_LABEL_ID = getItemId("label", player.id);
-  const RULER_END_DOT_ID = getItemId("end-point", player.id);
-  const rulerIds: RulerIds = {
-    background: RULER_BACKGROUND_ID,
-    line: RULER_LINE_ID,
-    label: RULER_LABEL_ID,
-    endDot: RULER_END_DOT_ID,
-  };
 
   // Set flags to reset interactions
   const expireAllInteractions = () => {
@@ -48,6 +36,7 @@ export function createDragMeasureMode(grid: Grid, player: Player) {
     if (itemInteraction && interactionIsExpired) {
       itemInteraction[1]();
       itemInteraction = null;
+      initialInteractedItem = null;
       dragStarted = false;
       interactionIsExpired = false;
     }
@@ -55,11 +44,18 @@ export function createDragMeasureMode(grid: Grid, player: Player) {
 
   // State that doesn't require extra handling
   let initialInteractedItem: Item | null = null;
-  let initialSharedItemAttachments: Item[] = [];
-  let initialLocalItemAttachments: Item[] = [];
+  let sharedAttachments: Item[] = [];
+  let localAttachments: Item[] = [];
   let rulerPoints: Vector2[] = []; // Points in the line being measured
   let pointerPosition: Vector2; // Track pointer position so it accessible to keyboard events
   let lastPosition: Vector2; // Memoize last position the token snapped to to prevent path measurement recalculation
+
+  const rulerIds: RulerIds = {
+    background: getItemId("background", player.id),
+    line: getItemId("line", player.id),
+    label: getItemId("label", player.id),
+    endDot: getItemId("end-point", player.id),
+  };
 
   OBR.tool.createMode({
     id: DRAG_MEASURE_MODE_ID,
@@ -86,55 +82,54 @@ export function createDragMeasureMode(grid: Grid, player: Player) {
     ],
     onToolDragStart: async (_, event) => {
       pointerPosition = event.pointerPosition;
-
       dragStarted = true;
       OBR.scene.items.deleteItems(Object.values(rulerIds));
 
       const token = event.target;
       if (token && isImage(token) && !token.locked) {
         initialInteractedItem = token;
-        const startPosition = await calculateInitialPosition(
-          grid,
-          token.position
-        );
+        const startPosition = await snapPosition(grid, token.position);
         lastPosition = startPosition;
         rulerPoints = [];
         rulerPoints.push(startPosition);
 
-        [
-          itemInteraction,
-          initialSharedItemAttachments,
-          initialLocalItemAttachments,
-        ] = await Promise.all([
-          OBR.interaction.startItemInteraction(
-            [
-              ...(await buildRuler(
-                rulerIds,
-                grid,
-                player,
-                startPosition,
-                token.visible,
-                false
-              )),
-              token,
-            ],
-            false
-          ),
-          OBR.scene.items.getItemAttachments([token.id]),
-          OBR.scene.local.getItemAttachments([token.id]),
-        ]);
+        [itemInteraction, sharedAttachments, localAttachments] =
+          await Promise.all([
+            OBR.interaction.startItemInteraction(
+              [
+                ...(await buildRuler(
+                  rulerIds,
+                  grid,
+                  player,
+                  startPosition,
+                  await snapPosition(grid, pointerPosition),
+                  token.visible,
+                  false
+                )),
+                token,
+              ],
+              false
+            ),
+            OBR.scene.items.getItemAttachments([token.id]),
+            OBR.scene.local.getItemAttachments([token.id]),
+          ]);
       } else {
-        const startPosition = await calculateInitialPosition(
-          grid,
-          pointerPosition
-        );
+        const startPosition = await snapPosition(grid, pointerPosition);
         lastPosition = startPosition;
         rulerPoints = [];
         rulerPoints.push(startPosition);
 
         [itemInteraction] = await Promise.all([
           OBR.interaction.startItemInteraction(
-            await buildRuler(rulerIds, grid, player, startPosition, true, true),
+            await buildRuler(
+              rulerIds,
+              grid,
+              player,
+              startPosition,
+              pointerPosition,
+              true,
+              true
+            ),
             false
           ),
         ]);
@@ -189,7 +184,6 @@ export function createDragMeasureMode(grid: Grid, player: Player) {
 
           expireAllInteractions();
           stopExpiredInteractions();
-          initialInteractedItem = null;
         }
       }
     },
@@ -199,7 +193,6 @@ export function createDragMeasureMode(grid: Grid, player: Player) {
 
       expireAllInteractions();
       stopExpiredInteractions();
-      initialInteractedItem = null;
     },
     onToolDragCancel: () => {
       // Fix bug where token is not locally displayed at its initial position on cancel
@@ -214,7 +207,6 @@ export function createDragMeasureMode(grid: Grid, player: Player) {
 
       expireAllInteractions();
       stopExpiredInteractions();
-      initialInteractedItem = null;
     },
   });
 
@@ -232,18 +224,18 @@ export function createDragMeasureMode(grid: Grid, player: Player) {
       };
 
       // Update dragged item and shared attachments
-      for (let i = 0; i < initialSharedItemAttachments.length; i++) {
-        initialSharedItemAttachments[i].position.x += positionChange.x;
-        initialSharedItemAttachments[i].position.y += positionChange.y;
+      for (let i = 0; i < sharedAttachments.length; i++) {
+        sharedAttachments[i].position.x += positionChange.x;
+        sharedAttachments[i].position.y += positionChange.y;
       }
-      OBR.scene.items.addItems(initialSharedItemAttachments);
+      OBR.scene.items.addItems(sharedAttachments);
 
       // Update local attachments
-      for (let i = 0; i < initialLocalItemAttachments.length; i++) {
-        initialLocalItemAttachments[i].position.x += positionChange.x;
-        initialLocalItemAttachments[i].position.y += positionChange.y;
+      for (let i = 0; i < localAttachments.length; i++) {
+        localAttachments[i].position.x += positionChange.x;
+        localAttachments[i].position.y += positionChange.y;
       }
-      OBR.scene.local.addItems(initialLocalItemAttachments);
+      OBR.scene.local.addItems(localAttachments);
     }
   }
 
@@ -272,13 +264,13 @@ export function createDragMeasureMode(grid: Grid, player: Player) {
         items.forEach(item => {
           if (initialInteractedItem && item.id === initialInteractedItem.id) {
             item.position = newPosition;
-          } else if (item.id === RULER_LINE_ID && isCurve(item)) {
+          } else if (item.id === rulerIds.line && isCurve(item)) {
             item.points = [...rulerPoints, newPosition];
-          } else if (item.id === RULER_BACKGROUND_ID && isCurve(item)) {
+          } else if (item.id === rulerIds.background && isCurve(item)) {
             item.points = [...rulerPoints, newPosition];
-          } else if (item.id === RULER_END_DOT_ID && isShape(item)) {
+          } else if (item.id === rulerIds.endDot && isShape(item)) {
             item.position = newPosition;
-          } else if (item.id === RULER_LABEL_ID && isLabel(item)) {
+          } else if (item.id === rulerIds.label && isLabel(item)) {
             item.position = getLabelPosition(grid, newPosition);
             if (newText) item.text.plainText = newText;
           }

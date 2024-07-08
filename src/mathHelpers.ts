@@ -107,7 +107,7 @@ export async function calculateSegmentEndPosition(
   }
 }
 
-export async function calculateInitialPosition(
+export async function snapPosition(
   grid: Grid,
   position: Vector2
 ): Promise<Vector2> {
