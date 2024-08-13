@@ -1,7 +1,7 @@
 {
   "name": "measure",
   "private": true,
-  "version": "1.2.1",
+  "version": "1.2.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,6 +13,7 @@
     "vite": "^5.2.0"
   },
   "dependencies": {
-    "@owlbear-rodeo/sdk": "^2.4.0"
+    "@owlbear-rodeo/sdk": "^2.4.0",
+    "color-parse": "^2.0.2"
   }
 }
