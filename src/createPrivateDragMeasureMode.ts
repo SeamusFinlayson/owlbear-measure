@@ -167,8 +167,7 @@ export function createPrivateDragMeasureMode(grid: Grid, player: Player) {
             }
           });
         },
-        true,
-        false
+        true
       );
     }
     lastPosition = newPosition;
