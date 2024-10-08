@@ -4,13 +4,10 @@ import {
   buildCurve,
   buildLabel,
   buildShape,
-  AttachmentBehavior,
 } from "@owlbear-rodeo/sdk";
 import { getLabelPosition, calculateDisplayDistance } from "./mathHelpers";
 import { Grid, Player, RulerIds } from "./types";
 import parse from "color-parse";
-
-const disabledAttachmentBehavior: AttachmentBehavior[] = ["POSITION"];
 
 export async function buildRuler(
   rulerIds: RulerIds,
@@ -38,7 +35,6 @@ export async function buildRuler(
       .visible(visible)
       .layer("RULER")
       .zIndex(10002)
-      // .disableAttachmentBehavior(disabledAttachmentBehavior)
       .build()
   );
 
@@ -54,7 +50,6 @@ export async function buildRuler(
       .visible(visible)
       .layer("RULER")
       .zIndex(10004)
-      // .disableAttachmentBehavior(disabledAttachmentBehavior)
       .disableHit(true)
       .build()
   );
@@ -74,7 +69,6 @@ export async function buildRuler(
         .width(grid.dpi / 4)
         .height(grid.dpi / 4)
         .zIndex(10001)
-        // .disableAttachmentBehavior(disabledAttachmentBehavior)
         .disableHit(true)
         .build()
     );
@@ -94,7 +88,6 @@ export async function buildRuler(
         .visible(visible)
         .layer("RULER")
         .zIndex(10000)
-        // .disableAttachmentBehavior(disabledAttachmentBehavior)
         .disableHit(true)
         .build()
     );
