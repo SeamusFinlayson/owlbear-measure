@@ -10,9 +10,9 @@ Install link: https://owlbear-measure.onrender.com/manifest.json
 
 **Setup**
 
-- Install the extension
-- Make sure the extension is enabled in the room in which you wish to use it
-- Select the Segmentable Ruler tool in the toolbar or use the shortcut **Z**
+1. Install the extension
+2. Make sure the extension is enabled in the room in which you wish to use it
+3. Select the Segmentable Ruler tool in the toolbar or use the shortcut **Z**
 
 **Making a measurement**
 
@@ -22,16 +22,17 @@ Install link: https://owlbear-measure.onrender.com/manifest.json
 
 **Finishing a measurement**
 
+- Press **escape** to cancel the measurement and return the token to its initial position
 - Release the token to move it to the current position
 - Press **enter** to make the ruler permanent and move the token to the current position
-- Press **escape** to return the token to its initial position
 
 **Making a private measurement**
 
-Other GMs and players are not shown your ruler and it is labeled as private. Private rulers cannot be made permanent or be used to move tokens.
+Other GMs and players are not shown your ruler and it is labeled as private.
 
 - Select the **Private Ruler** from the bar at the top of your screen
 - Use the same controls as you would for a normal measurement
+- Private rulers cannot be made permanent or be used to move tokens
 
 **Clear rulers**
 
@@ -48,7 +49,7 @@ The trash can icon labeled **Clear Rulers** will clear all permanent rulers that
 
 ## Limitations
 
-- Doesn't show measurement value to other users properly while measuring
+- Doesn't show measurement value to other users properly while measuring. The work around for this is to make a ruler permanent, then the correct measurement value will be displayed.
 
 ## Feature Requests
 
