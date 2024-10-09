@@ -25,7 +25,7 @@ export async function buildRuler(
   rulerConstituentItems.push(
     buildCurve()
       .id(rulerIds.line)
-      .attachedTo(rulerIds.label)
+      // .attachedTo(rulerIds.label)
       .points(points)
       .strokeColor(player.color)
       .fillOpacity(0)
@@ -50,6 +50,7 @@ export async function buildRuler(
       .visible(visible)
       .layer("RULER")
       .zIndex(10004)
+      .disableHit(true)
       .build()
   );
 
@@ -57,7 +58,7 @@ export async function buildRuler(
     rulerConstituentItems.push(
       buildShape()
         .id(rulerIds.endDot)
-        .attachedTo(rulerIds.label)
+        .attachedTo(rulerIds.line)
         .layer("RULER")
         .position(pointerPosition)
         .shapeType("CIRCLE")
@@ -77,7 +78,7 @@ export async function buildRuler(
     rulerConstituentItems.push(
       buildCurve()
         .id(rulerIds.background)
-        .attachedTo(rulerIds.label)
+        .attachedTo(rulerIds.line)
         .points(points)
         .strokeColor("white")
         .strokeOpacity(0.2)
