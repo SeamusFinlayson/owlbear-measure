@@ -18,6 +18,7 @@ import {
 import {
   DRAG_MEASURE_MODE_ID,
   getItemId,
+  getPluginId,
   RULER_MESSAGE_CHANNEL,
   TOOL_ID,
 } from "./idStrings";
@@ -50,6 +51,7 @@ export function createSharedRulerMode(grid: Grid, player: Player) {
   let initialInteractedItem: Item | null = null;
   let sharedAttachments: Item[] = [];
   let localAttachments: Item[] = [];
+
   let rulerPoints: Vector2[] = []; // Points in the line being measured
   let pointerPosition: Vector2; // Track pointer position so it accessible to keyboard events
   let lastPosition: Vector2; // Memoize last position the token snapped to to prevent path measurement recalculation
@@ -74,9 +76,14 @@ export function createSharedRulerMode(grid: Grid, player: Player) {
     ]);
 
     const token = event.target;
+    const idsInUse = (await OBR.party.getPlayers())
+      .map((player) => player.metadata?.[getPluginId("targetItem")])
+      .filter((val) => typeof val === "string");
+
     if (
       token &&
       isImage(token) &&
+      !idsInUse.includes(token.id) &&
       ((token.layer === "CHARACTER" && updateCharacter) ||
         (token.layer === "MOUNT" && updateMount)) &&
       !token.locked &&
@@ -85,6 +92,7 @@ export function createSharedRulerMode(grid: Grid, player: Player) {
       initialInteractedItem = token;
       const startPosition = await snapPosition(grid, token.position);
       lastPosition = startPosition;
+      console.log("start poistion", startPosition);
       rulerPoints = [];
       rulerPoints.push(startPosition);
 
@@ -102,6 +110,7 @@ export function createSharedRulerMode(grid: Grid, player: Player) {
         ]),
         OBR.scene.items.getItemAttachments([token.id]),
         OBR.scene.local.getItemAttachments([token.id]),
+        OBR.player.setMetadata({ [getPluginId("targetItem")]: token.id }),
       ]);
     } else {
       initialInteractedItem = null;
@@ -249,6 +258,7 @@ export function createSharedRulerMode(grid: Grid, player: Player) {
     currentRulerInitTime = 0;
     endUnusedInteractions();
     updateToolMetadata({ measuring: false, points: "NONE" });
+    OBR.player.setMetadata({ [getPluginId("targetItem")]: undefined });
   };
 
   OBR.broadcast.onMessage(RULER_MESSAGE_CHANNEL, async (event) => {
@@ -371,6 +381,8 @@ export function createSharedRulerMode(grid: Grid, player: Player) {
 
   async function updateInteractionTargetItems(pointerPosition: Vector2) {
     if (interactions && initialInteractedItem) {
+      const startPosition = rulerPoints[0];
+
       const newPosition = await calculateSegmentEndPosition(
         grid,
         rulerPoints[rulerPoints.length - 1],
@@ -378,8 +390,8 @@ export function createSharedRulerMode(grid: Grid, player: Player) {
       );
 
       const positionChange = {
-        x: newPosition.x - initialInteractedItem.position.x,
-        y: newPosition.y - initialInteractedItem.position.y,
+        x: newPosition.x - startPosition.x,
+        y: newPosition.y - startPosition.y,
       };
 
       // Update dragged item and shared attachments
