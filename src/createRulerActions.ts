@@ -55,7 +55,7 @@ export function createRulerActions() {
       },
     ],
     onClick: () =>
-      OBR.modal.open({
+      OBR.popover.open({
         id: getPluginId("help-popover"),
         height: 800,
         width: 600,
